@@ -90,6 +90,14 @@ export async function POST(request: Request) {
       await db
         .insert(orderItems)
         .values(priced.map((item) => ({ ...item, orderNumber: number })));
+
+      // Trigger order-created webhook (Fastn / Notion sync)
+      const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+      fetch(`${appUrl}/api/webhooks/order-created`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ order_number: number }),
+      }).catch((err) => console.error("Order webhook trigger error:", err));
     }
 
     return NextResponse.json({ orderNumber: number, total: subtotal + shipping });

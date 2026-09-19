@@ -103,11 +103,23 @@ export async function PUT(
 
       const result = await db.update(products).set(clean).where(condition).returning();
       if (result.length > 0) {
+        const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+        fetch(`${appUrl}/api/webhooks/inventory-updated`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ slug: result[0].slug }),
+        }).catch((err) => console.error("Inventory webhook trigger error:", err));
         return NextResponse.json({ product: result[0] });
       }
 
       const inserted = await db.insert(products).values(clean).returning();
       if (inserted.length > 0) {
+        const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+        fetch(`${appUrl}/api/webhooks/inventory-updated`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ slug: inserted[0].slug }),
+        }).catch((err) => console.error("Inventory webhook trigger error:", err));
         return NextResponse.json({ product: inserted[0] });
       }
     } catch (error) {

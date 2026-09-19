@@ -1,4 +1,4 @@
-﻿import { NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { products } from "@/db/schema";
@@ -36,10 +36,25 @@ export async function PATCH(request: Request) {
 
     const newStock = Math.max(0, Math.round(Number(body.stock) || 0));
 
+    let targetSlug = body.slug;
     if (body.id) {
-      await db.update(products).set({ stock: newStock }).where(eq(products.id, body.id));
+      const updated = await db
+        .update(products)
+        .set({ stock: newStock })
+        .where(eq(products.id, body.id))
+        .returning({ slug: products.slug });
+      if (updated[0]?.slug) targetSlug = updated[0].slug;
     } else if (body.slug) {
       await db.update(products).set({ stock: newStock }).where(eq(products.slug, body.slug));
+    }
+
+    if (targetSlug) {
+      const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+      fetch(`${appUrl}/api/webhooks/inventory-updated`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ slug: targetSlug }),
+      }).catch((err) => console.error("Inventory webhook trigger error:", err));
     }
 
     return NextResponse.json({ success: true, stock: newStock });

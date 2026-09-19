@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, gte, ilike, inArray, lte, or, sql } from "drizzle-orm";
 import { db, withRetry } from "@/db";
-import { categories, products, reviews } from "@/db/schema";
-import type { Category, Product, Review } from "@/db/schema";
+import { categories, orderItems, orders, products, reviews } from "@/db/schema";
+import type { Category, Order, OrderItem, Product, Review } from "@/db/schema";
 import { CATEGORY_OPTIONS, productCategories } from "@/lib/categories";
 
 function matchesCategory(slug: string) {
@@ -234,6 +234,40 @@ export async function getAllProductSlugs(): Promise<string[]> {
     );
     return rows.map((row) => row.slug);
   } catch {
+    return [];
+  }
+}
+
+export type OrderWithItems = Order & {
+  items: OrderItem[];
+};
+
+export async function getAllOrdersWithItems(): Promise<OrderWithItems[]> {
+  if (!db) return [];
+  try {
+    const orderRows = await withRetry(() =>
+      db!.select().from(orders).orderBy(desc(orders.createdAt)),
+    );
+    if (orderRows.length === 0) return [];
+
+    const orderNumbers = orderRows.map((o) => o.orderNumber);
+    const itemRows = await withRetry(() =>
+      db!.select().from(orderItems).where(inArray(orderItems.orderNumber, orderNumbers)),
+    );
+
+    const itemsByOrder = new Map<string, OrderItem[]>();
+    for (const item of itemRows) {
+      const list = itemsByOrder.get(item.orderNumber) ?? [];
+      list.push(item);
+      itemsByOrder.set(item.orderNumber, list);
+    }
+
+    return orderRows.map((order) => ({
+      ...order,
+      items: itemsByOrder.get(order.orderNumber) ?? [],
+    }));
+  } catch (error) {
+    console.error("Error fetching orders with items:", error);
     return [];
   }
 }

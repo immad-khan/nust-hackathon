@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -52,6 +52,13 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
     icon: "🔌",
     badge: "New",
     description: "Notion, Slack & Sheets sync",
+  },
+  {
+    href: "/admin/chat",
+    label: "AI Chat",
+    icon: "✨",
+    badge: "Beta",
+    description: "Ask AI about your store",
   },
 ];
 

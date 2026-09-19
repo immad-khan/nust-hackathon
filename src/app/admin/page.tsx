@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
@@ -103,6 +103,11 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [notice, setNotice] = useState("");
+
+  useEffect(() => {
+    void loadProducts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const authHeaders = (): Record<string, string> => {
     if (typeof window === "undefined") return {};
@@ -361,14 +366,7 @@ export default function AdminPage() {
         </>
       }
     >
-      {() => {
-        // eslint-disable-next-line react-hooks/rules-of-hooks
-        useEffect(() => {
-          void loadProducts();
-        }, []);
-
-        return (
-          <div>
+      <div>
             <div className="grid gap-4 sm:grid-cols-3">
               <div className="rounded-sm border border-line bg-cream p-5 shadow-xs">
                 <p className="text-[0.62rem] tracking-[0.18em] uppercase text-muted font-medium">Total Listed</p>
@@ -588,8 +586,6 @@ export default function AdminPage() {
               </div>
             )}
           </div>
-        );
-      }}
     </AdminShell>
   );
 }

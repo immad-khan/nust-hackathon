@@ -55,31 +55,10 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
   },
 ];
 
-interface AdminShellProps {
-  children: (props: {
-    authenticated: boolean;
-    authHeaders: () => Record<string, string>;
-    signOut: () => Promise<void>;
-  }) => ReactNode;
-  eyebrow?: string;
-  title: string;
-  description?: string;
-  actions?: ReactNode;
-}
-
-export function AdminShell({
-  children,
-  eyebrow = "Studio CRM",
-  title,
-  description,
-  actions,
-}: AdminShellProps) {
-  const pathname = usePathname();
+export function useAdminAuth() {
   const [authenticated, setAuthenticated] = useState<boolean | null>(null);
-  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState("");
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   useEffect(() => {
     const savedPassword = window.localStorage.getItem(PASS_KEY);
@@ -125,7 +104,6 @@ export function AdminShell({
       window.localStorage.setItem(PASS_KEY, cleanPass);
       if (data.token) window.localStorage.setItem(TOKEN_KEY, data.token);
       setAuthenticated(true);
-      setPassword("");
     } catch {
       setNotice("Login failed. Please try again.");
     } finally {
@@ -139,6 +117,37 @@ export function AdminShell({
     await fetch("/api/admin/session", { method: "DELETE" }).catch(() => undefined);
     setAuthenticated(false);
   }
+
+  return {
+    authenticated,
+    loading,
+    notice,
+    setNotice,
+    signIn,
+    signOut,
+    authHeaders: getAdminAuthHeaders,
+  };
+}
+
+interface AdminShellProps {
+  children: ReactNode;
+  eyebrow?: string;
+  title: string;
+  description?: string;
+  actions?: ReactNode;
+}
+
+export function AdminShell({
+  children,
+  eyebrow = "Studio CRM",
+  title,
+  description,
+  actions,
+}: AdminShellProps) {
+  const pathname = usePathname();
+  const { authenticated, loading, notice, signIn, signOut } = useAdminAuth();
+  const [password, setPassword] = useState("");
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   if (authenticated === null) {
     return (
@@ -328,13 +337,7 @@ export function AdminShell({
         </div>
 
         {/* Content Body */}
-        <div className="mt-8">
-          {children({
-            authenticated: true,
-            authHeaders: getAdminAuthHeaders,
-            signOut,
-          })}
-        </div>
+        <div className="mt-8">{children}</div>
       </main>
     </div>
   );

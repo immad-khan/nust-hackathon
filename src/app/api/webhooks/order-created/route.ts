@@ -1,14 +1,14 @@
-﻿import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { orders, orderItems } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { orders, orderItems, syncLog } from "@/db/schema";
+import { eq, sql } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { order_number } = body;
+    const { order_number, event_id } = body;
 
     if (!order_number) {
       return NextResponse.json(
@@ -21,6 +21,21 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         { error: "Database not configured" },
         { status: 500 }
+      );
+    }
+
+    const eventId = event_id || `order.created:${order_number}`;
+
+    // Deduplication check via syncLog table
+    const [existingLog] = await db
+      .select()
+      .from(syncLog)
+      .where(eq(syncLog.eventId, eventId));
+
+    if (existingLog && existingLog.status === "success") {
+      return NextResponse.json(
+        { success: true, deduplicated: true, synced: order_number, eventId },
+        { status: 200 }
       );
     }
 
@@ -44,13 +59,13 @@ export async function POST(req: NextRequest) {
       .where(eq(orderItems.orderNumber, order_number));
 
     // Format items as a single readable string for Notion
-    // e.g. "2x Pearl Earrings, 1x Gold Ring"
     const itemsSummary = items
       .map((item) => `${item.quantity}x ${item.name}${item.variant ? ` (${item.variant})` : ""}`)
       .join(", ");
 
-    // Build the payload for Fastn
+    // Build payload for Fastn
     const fastnPayload = {
+      event_id: eventId,
       order_number: order.orderNumber,
       customer_name: order.customerName,
       customer_email: order.email,
@@ -67,13 +82,37 @@ export async function POST(req: NextRequest) {
       created_at: order.createdAt,
     };
 
+    // Ensure initial log entry exists
+    await db
+      .insert(syncLog)
+      .values({
+        eventId,
+        type: "order.created",
+        status: "pending",
+        attempts: 1,
+        error: "",
+        payload: fastnPayload,
+      })
+      .onConflictDoUpdate({
+        target: syncLog.eventId,
+        set: {
+          attempts: sql`${syncLog.attempts} + 1`,
+          payload: fastnPayload,
+        },
+      });
+
     const webhookUrl = process.env.FASTN_ORDER_WEBHOOK_URL;
     if (!webhookUrl) {
-      // Return success in test/dev environment if webhook URL is not configured yet
       console.warn("FASTN_ORDER_WEBHOOK_URL is not set. Skipped remote dispatch.");
+      await db
+        .update(syncLog)
+        .set({ status: "success", error: "FASTN_ORDER_WEBHOOK_URL not configured yet (local-success)" })
+        .where(eq(syncLog.eventId, eventId));
+
       return NextResponse.json({
         success: true,
         synced: order_number,
+        eventId,
         notice: "FASTN_ORDER_WEBHOOK_URL not configured yet",
       });
     }
@@ -86,18 +125,29 @@ export async function POST(req: NextRequest) {
     });
 
     if (!fastnRes.ok) {
-      console.error("Fastn webhook failed:", await fastnRes.text());
+      const errText = await fastnRes.text();
+      console.error("Fastn webhook failed:", errText);
+      await db
+        .update(syncLog)
+        .set({ status: "failed", error: errText.slice(0, 500) })
+        .where(eq(syncLog.eventId, eventId));
+
       return NextResponse.json(
-        { error: "Failed to sync to Fastn" },
+        { error: "Failed to sync to Fastn", details: errText },
         { status: 500 }
       );
     }
 
+    // Update syncLog to success
+    await db
+      .update(syncLog)
+      .set({ status: "success", error: "" })
+      .where(eq(syncLog.eventId, eventId));
+
     return NextResponse.json(
-      { success: true, synced: order_number },
+      { success: true, synced: order_number, eventId },
       { status: 200 }
     );
-
   } catch (err) {
     console.error("Order webhook error:", err);
     return NextResponse.json(

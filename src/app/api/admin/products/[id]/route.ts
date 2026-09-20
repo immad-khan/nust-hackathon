@@ -104,10 +104,11 @@ export async function PUT(
       const result = await db.update(products).set(clean).where(condition).returning();
       if (result.length > 0) {
         const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+        const eventId = `inventory.updated:${result[0].slug}:${result[0].stock}`;
         fetch(`${appUrl}/api/webhooks/inventory-updated`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ slug: result[0].slug }),
+          body: JSON.stringify({ slug: result[0].slug, event_id: eventId }),
         }).catch((err) => console.error("Inventory webhook trigger error:", err));
         return NextResponse.json({ product: result[0] });
       }
@@ -115,10 +116,11 @@ export async function PUT(
       const inserted = await db.insert(products).values(clean).returning();
       if (inserted.length > 0) {
         const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+        const eventId = `inventory.updated:${inserted[0].slug}:${inserted[0].stock}`;
         fetch(`${appUrl}/api/webhooks/inventory-updated`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ slug: inserted[0].slug }),
+          body: JSON.stringify({ slug: inserted[0].slug, event_id: eventId }),
         }).catch((err) => console.error("Inventory webhook trigger error:", err));
         return NextResponse.json({ product: inserted[0] });
       }

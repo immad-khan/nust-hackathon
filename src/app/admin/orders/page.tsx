@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useEffect, useMemo, useState } from "react";
 import { AdminShell, getAdminAuthHeaders } from "@/components/admin-shell";
@@ -30,6 +30,7 @@ type Order = {
   shipping: number;
   total: number;
   status: string;
+  adminSeen?: boolean;
   createdAt: string;
   items: OrderItem[];
 };
@@ -135,6 +136,23 @@ export default function AdminOrdersPage() {
       alert("Failed to update order status");
     } finally {
       setUpdatingStatus(null);
+    }
+  }
+
+  function openOrderModal(order: Order) {
+    setSelectedOrder(order);
+    if (!order.adminSeen) {
+      fetch("/api/admin/orders", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", ...getAdminAuthHeaders() },
+        body: JSON.stringify({ orderNumber: order.orderNumber, adminSeen: true }),
+      }).catch((err) => console.error("Mark seen error:", err));
+
+      setOrders((prev) =>
+        prev.map((o) =>
+          o.orderNumber === order.orderNumber ? { ...o, adminSeen: true } : o
+        )
+      );
     }
   }
 
@@ -327,79 +345,99 @@ export default function AdminOrdersPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-line/60">
-                  {filteredOrders.map((order) => (
-                    <tr
-                      key={order.orderNumber}
-                      className="transition hover:bg-blush-soft/30 group"
-                    >
-                      <td className="px-5 py-4 font-mono text-xs font-semibold text-rose-deep whitespace-nowrap">
-                        {order.orderNumber}
-                      </td>
-
-                      <td className="px-5 py-4 font-medium text-ink whitespace-nowrap">
-                        {order.customerName}
-                      </td>
-
-                      <td className="px-5 py-4 text-xs text-ink-soft whitespace-nowrap">
-                        <a href={`mailto:${order.email}`} className="hover:text-rose-deep underline-offset-2 hover:underline">
-                          {order.email}
-                        </a>
-                      </td>
-
-                      <td className="px-5 py-4 min-w-[220px]">
-                        {order.items && order.items.length > 0 ? (
-                          <div className="space-y-1">
-                            {order.items.slice(0, 2).map((item, idx) => (
-                              <div key={idx} className="flex items-center gap-1.5 text-xs text-ink">
-                                <span className="font-semibold text-rose-deep">{item.quantity}x</span>
-                                <span className="truncate max-w-[170px]">{item.name}</span>
-                                {item.variant && (
-                                  <span className="text-[0.62rem] text-muted">({item.variant})</span>
-                                )}
-                              </div>
-                            ))}
-                            {order.items.length > 2 && (
-                              <span className="text-[0.65rem] text-muted italic">
-                                +{order.items.length - 2} more item{order.items.length - 2 > 1 ? "s" : ""}
+                  {filteredOrders.map((order) => {
+                    const isNew = order.adminSeen === false;
+                    return (
+                      <tr
+                        key={order.orderNumber}
+                        className={`transition group cursor-pointer ${
+                          isNew ? "bg-rose-light/10 hover:bg-rose-light/20" : "hover:bg-blush-soft/30"
+                        }`}
+                        onClick={() => openOrderModal(order)}
+                      >
+                        <td className="px-5 py-4 font-mono text-xs font-semibold text-rose-deep whitespace-nowrap">
+                          <div className="flex items-center gap-2">
+                            {isNew && (
+                              <span className="inline-flex items-center gap-1 rounded-full bg-rose-deep px-1.5 py-0.5 text-[0.52rem] font-bold tracking-wider uppercase text-cream animate-pulse">
+                                NEW
                               </span>
                             )}
+                            <span>{order.orderNumber}</span>
                           </div>
-                        ) : (
-                          <span className="text-xs text-muted italic">Standard Order</span>
-                        )}
-                      </td>
+                        </td>
 
-                      <td className="px-5 py-4 font-serif text-base font-semibold text-ink whitespace-nowrap">
-                        {formatCurrency(order.total)}
-                      </td>
+                        <td className="px-5 py-4 font-medium text-ink whitespace-nowrap">
+                          {order.customerName}
+                        </td>
 
-                      <td className="px-5 py-4 whitespace-nowrap">
-                        {getStatusBadge(order.status)}
-                      </td>
+                        <td className="px-5 py-4 text-xs text-ink-soft whitespace-nowrap">
+                          <a
+                            href={`mailto:${order.email}`}
+                            onClick={(e) => e.stopPropagation()}
+                            className="hover:text-rose-deep underline-offset-2 hover:underline"
+                          >
+                            {order.email}
+                          </a>
+                        </td>
 
-                      <td className="px-5 py-4 text-xs text-ink-soft whitespace-nowrap">
-                        {formatDate(order.createdAt)}
-                      </td>
+                        <td className="px-5 py-4 min-w-[220px]">
+                          {order.items && order.items.length > 0 ? (
+                            <div className="space-y-1">
+                              {order.items.slice(0, 2).map((item, idx) => (
+                                <div key={idx} className="flex items-center gap-1.5 text-xs text-ink">
+                                  <span className="font-semibold text-rose-deep">{item.quantity}x</span>
+                                  <span className="truncate max-w-[170px]">{item.name}</span>
+                                  {item.variant && (
+                                    <span className="text-[0.62rem] text-muted">({item.variant})</span>
+                                  )}
+                                </div>
+                              ))}
+                              {order.items.length > 2 && (
+                                <span className="text-[0.65rem] text-muted italic">
+                                  +{order.items.length - 2} more item{order.items.length - 2 > 1 ? "s" : ""}
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-xs text-muted italic">Standard Order</span>
+                          )}
+                        </td>
 
-                      <td className="px-5 py-4 whitespace-nowrap">
-                        <span className="inline-flex items-center gap-1.5 rounded-full bg-purple-500/10 px-2.5 py-1 text-[0.62rem] font-medium tracking-wider uppercase text-purple-700 border border-purple-300">
-                          <svg className="h-3 w-3 fill-current text-purple-600" viewBox="0 0 24 24">
-                            <path d="M4.459 4.208c.746.606 1.026.56 2.428.466l13.215-.793c.28 0 .047-.28-.046-.373L18.47 2.295c-.42-.373-.98-.607-1.726-.56L3.993 2.715c-.42.047-.56.327-.373.56l.839.933zm.98 3.966v12.455c0 .793.42 1.166 1.306 1.12l14.288-.84c.886-.046 1.12-.56 1.12-1.306V7.194c0-.653-.28-.98-.84-.933l-15.034.886c-.56.047-.84.373-.84.933zm11.755 1.54c.093.373 0 .746-.373.793l-.84.14v8.257c-.42.233-.84.373-1.26.373-.7 0-1.026-.233-1.633-.98l-4.2-6.577v6.624l1.353.28c.373.093.466.42.373.793-.093.373-.466.42-.84.42l-2.613.14c-.373 0-.466-.373-.373-.747.093-.373.373-.42.746-.466l.84-.14V9.667l-1.12-.14c-.373-.047-.466-.373-.373-.747.093-.373.466-.42.84-.42l2.8-.14 4.526 6.81V8.874l-1.073-.14c-.373-.047-.466-.373-.373-.747.093-.373.466-.42.84-.42l2.613-.14c.373 0 .466.373.42.747z"/>
-                          </svg>
-                          Synced
-                        </span>
-                      </td>
+                        <td className="px-5 py-4 font-serif text-base font-semibold text-ink whitespace-nowrap">
+                          {formatCurrency(order.total)}
+                        </td>
 
-                      <td className="px-5 py-4 text-right whitespace-nowrap">
-                        <button
-                          onClick={() => setSelectedOrder(order)}
-                          className="rounded-sm border border-line px-3 py-1.5 text-[0.62rem] tracking-[0.14em] uppercase text-ink transition hover:border-rose-light hover:bg-blush-soft"
-                        >
-                          View Details
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                        <td className="px-5 py-4 whitespace-nowrap">
+                          {getStatusBadge(order.status)}
+                        </td>
+
+                        <td className="px-5 py-4 text-xs text-ink-soft whitespace-nowrap">
+                          {formatDate(order.createdAt)}
+                        </td>
+
+                        <td className="px-5 py-4 whitespace-nowrap">
+                          <span className="inline-flex items-center gap-1.5 rounded-full bg-purple-500/10 px-2.5 py-1 text-[0.62rem] font-medium tracking-wider uppercase text-purple-700 border border-purple-300">
+                            <svg className="h-3 w-3 fill-current text-purple-600" viewBox="0 0 24 24">
+                              <path d="M4.459 4.208c.746.606 1.026.56 2.428.466l13.215-.793c.28 0 .047-.28-.046-.373L18.47 2.295c-.42-.373-.98-.607-1.726-.56L3.993 2.715c-.42.047-.56.327-.373.56l.839.933zm.98 3.966v12.455c0 .793.42 1.166 1.306 1.12l14.288-.84c.886-.046 1.12-.56 1.12-1.306V7.194c0-.653-.28-.98-.84-.933l-15.034.886c-.56.047-.84.373-.84.933zm11.755 1.54c.093.373 0 .746-.373.793l-.84.14v8.257c-.42.233-.84.373-1.26.373-.7 0-1.026-.233-1.633-.98l-4.2-6.577v6.624l1.353.28c.373.093.466.42.373.793-.093.373-.466.42-.84.42l-2.613.14c-.373 0-.466-.373-.373-.747.093-.373.373-.42.746-.466l.84-.14V9.667l-1.12-.14c-.373-.047-.466-.373-.373-.747.093-.373.466-.42.84-.42l2.8-.14 4.526 6.81V8.874l-1.073-.14c-.373-.047-.466-.373-.373-.747.093-.373.466-.42.84-.42l2.613-.14c.373 0 .466.373.42.747z"/>
+                            </svg>
+                            Synced
+                          </span>
+                        </td>
+
+                        <td className="px-5 py-4 text-right whitespace-nowrap">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openOrderModal(order);
+                            }}
+                            className="rounded-sm border border-line px-3 py-1.5 text-[0.62rem] tracking-[0.14em] uppercase text-ink transition hover:border-rose-light hover:bg-blush-soft"
+                          >
+                            View Details
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

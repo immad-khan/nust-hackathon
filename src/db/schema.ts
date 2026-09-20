@@ -66,6 +66,7 @@ export const orders = pgTable("orders", {
   shipping: integer("shipping").notNull().default(0),
   total: integer("total").notNull().default(0),
   status: varchar("status", { length: 40 }).notNull().default("confirmed"),
+  adminSeen: boolean("admin_seen").notNull().default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -105,8 +106,21 @@ export const uploads = pgTable("uploads", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+export const syncLog = pgTable("sync_log", {
+  id: serial("id").primaryKey(),
+  eventId: varchar("event_id", { length: 200 }).notNull().unique(),
+  type: varchar("type", { length: 60 }).notNull(),
+  status: varchar("status", { length: 20 }).notNull().default("pending"), // pending | success | failed
+  attempts: integer("attempts").notNull().default(0),
+  error: text("error").notNull().default(""),
+  payload: jsonb("payload").notNull().default({}),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
 export type Product = typeof products.$inferSelect;
 export type Category = typeof categories.$inferSelect;
 export type Review = typeof reviews.$inferSelect;
 export type Order = typeof orders.$inferSelect;
 export type OrderItem = typeof orderItems.$inferSelect;
+export type SyncLog = typeof syncLog.$inferSelect;
+

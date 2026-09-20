@@ -50,10 +50,11 @@ export async function PATCH(request: Request) {
 
     if (targetSlug) {
       const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+      const eventId = `inventory.updated:${targetSlug}:${newStock}`;
       fetch(`${appUrl}/api/webhooks/inventory-updated`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ slug: targetSlug }),
+        body: JSON.stringify({ slug: targetSlug, event_id: eventId }),
       }).catch((err) => console.error("Inventory webhook trigger error:", err));
     }
 

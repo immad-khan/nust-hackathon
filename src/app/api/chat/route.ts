@@ -7,7 +7,8 @@ import { isAdminAuthenticated } from "@/lib/admin-auth";
 type ChatMessage = { role: "user" | "assistant" | "system"; content: string };
 
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
-const GROQ_MODEL = "llama-3.1-8b-instant";
+const GROQ_MODEL = process.env.GROQ_MODEL || process.env.AI_MODEL || "openai/gpt-oss-120b";
+const FALLBACK_MODELS = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"];
 
 /** Gather live store context from the database */
 async function getStoreContext(): Promise<string> {
@@ -162,42 +163,55 @@ export async function POST(req: NextRequest) {
 
     const groqApiKey = process.env.GROQ_API_KEY;
 
-    // If Groq API key is available, use it
+    // If Groq API key is available, attempt LLM call
     if (groqApiKey) {
       const systemMessage: ChatMessage = {
         role: "system",
         content: `${SYSTEM_PROMPT}\n\nHere is the current live store data:\n\n${storeContext}`,
       };
 
-      const res = await fetch(GROQ_API_URL, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${groqApiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: GROQ_MODEL,
-          messages: [systemMessage, ...userMessages.slice(-10)],
-          temperature: 0.7,
-          max_tokens: 1024,
-          top_p: 0.9,
-        }),
-      });
+      const candidateModels = Array.from(
+        new Set([GROQ_MODEL, ...FALLBACK_MODELS].filter(Boolean))
+      );
 
-      if (!res.ok) {
-        const errBody = await res.text();
-        console.error("[chat] Groq API error:", res.status, errBody);
-        throw new Error(`Groq API returned ${res.status}`);
+      for (const modelToTry of candidateModels) {
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+          const res = await fetch(GROQ_API_URL, {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${groqApiKey}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              model: modelToTry,
+              messages: [systemMessage, ...userMessages.slice(-10)],
+              temperature: 0.7,
+              max_tokens: 1024,
+              top_p: 0.9,
+            }),
+            signal: controller.signal,
+          });
+
+          clearTimeout(timeoutId);
+
+          if (res.ok) {
+            const data = (await res.json()) as {
+              choices?: { message?: { content?: string } }[];
+            };
+            const reply =
+              data.choices?.[0]?.message?.content || "No response generated.";
+            return NextResponse.json({ reply });
+          } else {
+            const errBody = await res.text();
+            console.warn(`[chat] Model ${modelToTry} failed (${res.status}):`, errBody);
+          }
+        } catch (modelErr) {
+          console.warn(`[chat] Request failed for model ${modelToTry}:`, modelErr);
+        }
       }
-
-      const data = (await res.json()) as {
-        choices?: { message?: { content?: string } }[];
-      };
-
-      const reply =
-        data.choices?.[0]?.message?.content || "No response generated.";
-
-      return NextResponse.json({ reply });
     }
 
     // Fallback: generate a smart response from DB data without LLM

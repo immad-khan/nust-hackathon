@@ -65,18 +65,19 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Image data is required." }, { status: 400 });
     }
 
+    const cleanBase64 = body.dataBase64.replace(/^data:[^;]+;base64,/, "");
     const mime = body.mimeType ?? "image/jpeg";
-    const sizeBytes = Math.round((body.dataBase64.length * 3) / 4);
+    const sizeBytes = Math.round((cleanBase64.length * 3) / 4);
 
     if (!ALLOWED_TYPES.has(mime)) {
       return NextResponse.json({ error: "Only JPEG, PNG and WebP images are allowed." }, { status: 415 });
     }
     if (sizeBytes > MAX_UPLOAD_BYTES) {
-      return NextResponse.json({ error: "Image must be smaller than 5 MB." }, { status: 413 });
+      return NextResponse.json({ error: "Image must be smaller than 10 MB." }, { status: 413 });
     }
 
     // Try Cloudinary first
-    const cloudinaryUrl = await uploadToCloudinary(body.dataBase64, mime);
+    const cloudinaryUrl = await uploadToCloudinary(cleanBase64, mime);
     if (cloudinaryUrl) {
       return NextResponse.json({ url: cloudinaryUrl });
     }

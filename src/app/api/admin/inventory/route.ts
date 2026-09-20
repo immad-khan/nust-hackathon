@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { products } from "@/db/schema";
 import { isAdminAuthenticated } from "@/lib/admin-auth";
 import { getProducts } from "@/lib/queries";
+import { emitEvent } from "@/lib/events";
 
 export const dynamic = "force-dynamic";
 
@@ -49,13 +50,19 @@ export async function PATCH(request: Request) {
     }
 
     if (targetSlug) {
-      const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-      const eventId = `inventory.updated:${targetSlug}:${newStock}`;
-      fetch(`${appUrl}/api/webhooks/inventory-updated`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ slug: targetSlug, event_id: eventId }),
-      }).catch((err) => console.error("Inventory webhook trigger error:", err));
+      emitEvent("product.updated", {
+        slug: targetSlug,
+        stock: newStock,
+        updatedAt: new Date().toISOString(),
+      }).catch((err) => console.error("[admin inventory] emitEvent product.updated error:", err));
+
+      if (newStock < 10) {
+        emitEvent("stock.low", {
+          slug: targetSlug,
+          stock: newStock,
+          updatedAt: new Date().toISOString(),
+        }).catch((err) => console.error("[admin inventory] emitEvent stock.low error:", err));
+      }
     }
 
     return NextResponse.json({ success: true, stock: newStock });

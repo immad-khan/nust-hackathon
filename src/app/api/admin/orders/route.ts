@@ -5,6 +5,7 @@ import { orders } from "@/db/schema";
 import { isAdminAuthenticated } from "@/lib/admin-auth";
 import { getAllOrdersWithItems } from "@/lib/queries";
 import { emitEvent } from "@/lib/events";
+import { sendMail, renderOrderStatusUpdateHtml } from "@/lib/email";
 
 export const dynamic = "force-dynamic";
 
@@ -70,6 +71,26 @@ export async function PATCH(request: Request) {
           total: orderRow.total,
           updatedAt: new Date().toISOString(),
         }).catch((err) => console.error("[admin orders] emitEvent order.status_changed error:", err));
+
+        // Customer status update email
+        if (orderRow.email) {
+          try {
+            await sendMail({
+              to: orderRow.email,
+              subject: `Order #${orderRow.orderNumber} Status Update: ${body.status.toUpperCase()} — Prem by SHK`,
+              html: renderOrderStatusUpdateHtml({
+                orderNumber: orderRow.orderNumber,
+                customerName: orderRow.customerName,
+                newStatus: body.status,
+                total: orderRow.total,
+              }),
+              eventId: `email:order.status_changed:${orderRow.orderNumber}:${body.status}`,
+              metadata: { orderNumber: orderRow.orderNumber, newStatus: body.status },
+            });
+          } catch (emailErr) {
+            console.error("[admin orders] Status update email error:", emailErr);
+          }
+        }
       }
     }
 

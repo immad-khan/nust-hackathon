@@ -5,6 +5,11 @@ import { orderItems, orders, products, syncLog } from "@/db/schema";
 import { getProductsBySlugs } from "@/lib/queries";
 import { shippingFor } from "@/lib/format";
 import { emitEvent } from "@/lib/events";
+import {
+  sendMail,
+  renderOrderConfirmationHtml,
+  renderAdminOrderAlertHtml,
+} from "@/lib/email";
 
 export const dynamic = "force-dynamic";
 
@@ -178,6 +183,57 @@ export async function POST(request: Request) {
             price: item.unitPrice,
           }).catch((err) => console.error("[orders] emitEvent stock.low error:", err));
         }
+      }
+
+      // Email notifications (Customer confirmation + Admin new order alert)
+      try {
+        const orderEmailData = {
+          orderNumber: number,
+          customerName: payload.customerName!,
+          email: payload.email!,
+          phone: payload.phone ?? "",
+          address: payload.address ?? "",
+          city: payload.city ?? "",
+          country: payload.country ?? "Pakistan",
+          items: priced.map((p) => ({
+            name: p.name,
+            variant: p.variant,
+            quantity: p.quantity,
+            unitPrice: p.unitPrice,
+            image: p.image,
+          })),
+          subtotal,
+          shipping,
+          total: subtotal + shipping,
+          status: "confirmed",
+          note: payload.note ?? "",
+          createdAt: new Date().toISOString(),
+        };
+
+        const adminEmail =
+          process.env.EMAIL_HOST_USER ||
+          process.env.SMTP_USER ||
+          "immadonline702@gmail.com";
+
+        // Await emails before returning so serverless function does not exit early
+        await Promise.allSettled([
+          sendMail({
+            to: payload.email!,
+            subject: `Order Confirmation #${number} — Prem by SHK`,
+            html: renderOrderConfirmationHtml(orderEmailData),
+            eventId: `email:order.confirmation:${number}`,
+            metadata: { orderNumber: number, recipientType: "customer" },
+          }),
+          sendMail({
+            to: adminEmail,
+            subject: `🔔 New Order #${number} from ${payload.customerName}`,
+            html: renderAdminOrderAlertHtml(orderEmailData),
+            eventId: `email:order.admin_alert:${number}`,
+            metadata: { orderNumber: number, recipientType: "admin" },
+          }),
+        ]);
+      } catch (emailErr) {
+        console.error("[orders] Email dispatch error:", emailErr);
       }
     }
 

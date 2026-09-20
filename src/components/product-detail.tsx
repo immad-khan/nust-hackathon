@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import type { Product } from "@/db/schema";
 import { useCart } from "@/components/cart-provider";
@@ -12,13 +13,39 @@ import { defaultProductMessage, whatsappLink } from "@/lib/whatsapp";
 import { categoryLabel, productCategories } from "@/lib/categories";
 
 export function ProductDetail({ product }: { product: Product }) {
-  const { toggleWishlist, isWishlisted } = useCart();
+  const router = useRouter();
+  const { addItem, closeCart, toggleWishlist, isWishlisted } = useCart();
   const images = product.images.length > 0 ? product.images : ["https://images.pexels.com/photos/16038189/pexels-photo-16038189.jpeg?auto=compress&cs=tinysrgb&fit=crop&h=1200&w=900"];
   const [activeImage, setActiveImage] = useState(images[0]);
   const [variant, setVariant] = useState(product.colors[0] ?? "Gold");
+  const [added, setAdded] = useState(false);
   const wished = isWishlisted(product.slug);
 
   const message = `${defaultProductMessage(product.name, product.slug)} Variant: ${variant}`;
+
+  function handleAddToCart() {
+    addItem({
+      slug: product.slug,
+      name: product.name,
+      price: product.price,
+      image: activeImage,
+      variant,
+    }, 1);
+    setAdded(true);
+    setTimeout(() => setAdded(false), 2000);
+  }
+
+  function handleBuyNow() {
+    addItem({
+      slug: product.slug,
+      name: product.name,
+      price: product.price,
+      image: activeImage,
+      variant,
+    }, 1);
+    closeCart();
+    router.push("/checkout");
+  }
 
   return (
     <div className="mx-auto grid max-w-7xl gap-10 px-4 py-10 lg:grid-cols-2 lg:px-8">
@@ -137,26 +164,48 @@ export function ProductDetail({ product }: { product: Product }) {
           </div>
         )}
 
-        <div className="mt-7 flex flex-wrap items-center gap-3">
-          <a
-            href={whatsappLink(message)}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex flex-1 items-center justify-center gap-3 rounded-sm bg-gradient-to-r from-rose-deep to-rose px-8 py-4 text-[0.68rem] tracking-[0.24em] uppercase text-cream transition hover:from-rose hover:to-rose-deep"
-          >
-            <WhatsAppMark className="h-5 w-5" />
-            Chat on WhatsApp
-          </a>
+        <div className="mt-8 space-y-3">
+          {/* Primary Action Buttons: Buy Now + Add to Bag */}
+          <div className="flex flex-col sm:flex-row items-stretch gap-3">
+            <button
+              onClick={handleBuyNow}
+              disabled={product.stock <= 0}
+              className="flex-1 rounded-sm bg-rose-deep px-8 py-4 text-center text-[0.7rem] font-semibold tracking-[0.24em] uppercase text-cream shadow-sm transition hover:bg-rose disabled:opacity-50 disabled:hover:bg-rose-deep cursor-pointer"
+            >
+              {product.stock <= 0 ? "Out of Stock" : "Buy Now"}
+            </button>
 
-          <button
-            aria-label="Save to wishlist"
-            onClick={() => toggleWishlist(product.slug)}
-            className={`rounded-sm border border-line p-4 transition hover:border-rose-light ${
-              wished ? "text-rose-deep" : "text-ink-soft"
-            }`}
-          >
-            <HeartIcon className="h-5 w-5" filled={wished} />
-          </button>
+            <button
+              onClick={handleAddToCart}
+              disabled={product.stock <= 0}
+              className="flex-1 rounded-sm border border-line bg-cream px-8 py-4 text-center text-[0.7rem] font-medium tracking-[0.22em] uppercase text-ink transition hover:border-rose-light hover:bg-blush-soft disabled:opacity-50 cursor-pointer"
+            >
+              {added ? "Added to Bag ✓" : "Add to Bag"}
+            </button>
+          </div>
+
+          {/* Secondary Actions: WhatsApp + Wishlist */}
+          <div className="flex items-center gap-3">
+            <a
+              href={whatsappLink(message)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex flex-1 items-center justify-center gap-2.5 rounded-sm border border-[#25D366]/30 bg-[#25D366]/10 px-6 py-3.5 text-[0.66rem] tracking-[0.2em] uppercase text-emerald-800 transition hover:bg-[#25D366]/20"
+            >
+              <WhatsAppMark className="h-4 w-4 text-[#25D366]" />
+              Order on WhatsApp
+            </a>
+
+            <button
+              aria-label="Save to wishlist"
+              onClick={() => toggleWishlist(product.slug)}
+              className={`rounded-sm border border-line p-3.5 transition hover:border-rose-light ${
+                wished ? "text-rose-deep bg-blush-soft/50" : "text-ink-soft bg-cream"
+              }`}
+            >
+              <HeartIcon className="h-5 w-5" filled={wished} />
+            </button>
+          </div>
         </div>
 
 

@@ -3,12 +3,17 @@ import { db } from "@/db";
 import { products, orders, orderItems } from "@/db/schema";
 import { desc, sql, eq } from "drizzle-orm";
 import { isAdminAuthenticated } from "@/lib/admin-auth";
+import { emitEvent } from "@/lib/events";
 
-type ChatMessage = { role: "user" | "assistant" | "system"; content: string };
+export type ChatMessage = {
+  role: "user" | "assistant" | "system";
+  content: string;
+  images?: string[];
+};
 
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 const GROQ_MODEL = process.env.GROQ_MODEL || process.env.AI_MODEL || "openai/gpt-oss-120b";
-const FALLBACK_MODELS = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"];
+const FALLBACK_MODELS = ["openai/gpt-oss-20b", "groq/compound", "qwen/qwen3.8-27b"];
 
 /** Gather live store context from the database */
 async function getStoreContext(): Promise<string> {
@@ -123,22 +128,158 @@ async function getStoreContext(): Promise<string> {
   }
 }
 
-const SYSTEM_PROMPT = `You are the AI assistant for "Prem by SHK", a premium jewellery e-commerce store. You help the store owner (merchant) manage their business.
+const SYSTEM_PROMPT = `You are the AI assistant for "Prem by SHK", a luxury jewellery brand. You help the store owner (merchant) manage orders, inventory, analytics, and products.
 
 Your capabilities:
 1. Answer questions about orders, inventory, revenue, and product analytics
-2. Provide business insights and recommendations
-3. Help identify low-stock items that need restocking
-4. Summarize order patterns and customer trends
+2. Create and add new products to the store catalog from merchant prompts or pasted images
+3. Review product requirements and guide the merchant interactively
+4. Provide business insights and recommendations
+
+Available Categories:
+- "earrings" (Earrings)
+- "rings" (Rings)
+- "necklaces" (Necklaces)
+- "bracelets" (Bracelets)
+- "cuffs" (Cuffs)
+- "sets" (Gift Sets & Bridal Sets)
+
+### Product Creation & Requirements Workflow:
+When a merchant wants to add a product or attaches image(s):
+1. Check what information is available:
+   - Product Name (e.g. "Royal Kundan Choker")
+   - Category (must be one of: earrings, rings, necklaces, bracelets, cuffs, sets)
+   - Price in PKR (e.g. 45000)
+   - Stock (default to 20 if not specified)
+   - Material & Description (generate a fitting luxury description if none provided)
+   - Images (use any [Attached Cloudinary Images] provided in the conversation)
+
+2. If critical information (Name, Price, or Category) is MISSING:
+   - Ask the merchant politely for the missing details.
+   - Summarize what you have so far (e.g. image received, proposed name/category).
+   - Show an interactive proposal code block:
+\`\`\`action:propose_product
+{
+  "name": "Suggested Product Name",
+  "categorySlug": "earrings",
+  "price": 0,
+  "stock": 20,
+  "material": "18K Gold Plated",
+  "shortDescription": "Handcrafted luxury jewellery piece.",
+  "description": "Exquisite artisanal craftsmanship designed for enduring elegance.",
+  "images": ["<image_url_if_any>"]
+}
+\`\`\`
+
+3. When the merchant CONFIRMS (e.g. says "add", "add it", "yes", "confirm", "proceed", "looks good", or has provided all required details and wants to create):
+   - You MUST output the creation action block in your response:
+\`\`\`action:create_product
+{
+  "name": "Product Name",
+  "categorySlug": "earrings",
+  "price": 45000,
+  "stock": 20,
+  "material": "18K Gold Plated with Kundan Crystals",
+  "shortDescription": "Handcrafted luxury jewellery piece.",
+  "description": "Exquisite artisanal craftsmanship designed for enduring elegance.",
+  "images": ["<image_url_if_any>"]
+}
+\`\`\`
+   - Note: The server automatically parses the \`\`\`action:create_product ... \`\`\` block and inserts the product into the PostgreSQL database, registers it in \`sync_log\`, and creates the store slug.
 
 Guidelines:
-- Be concise but helpful. Use bullet points and numbers.
-- Prices are in PKR (Pakistani Rupees).
-- Format currency with commas (e.g. PKR 12,500).
-- If you don't have enough data to answer, say so honestly.
-- For actions you can't perform (like updating stock), tell the merchant which admin page to use.
-- Use a professional but warm tone suitable for a luxury jewellery brand.
-- Use **bold** for emphasis and - for bullet points in your responses.`;
+- Prices are in PKR (Pakistani Rupees). Format with commas (e.g. PKR 35,000).
+- Be concise, helpful, and maintain a warm, luxury jewellery brand tone.
+- Use **bold** for key attributes.`;
+
+async function handleProductCreationAction(aiReply: string): Promise<{
+  reply: string;
+  createdProduct?: any;
+}> {
+  const match = aiReply.match(/```action:create_product\s*([\s\S]*?)\s*```/);
+  if (!match) return { reply: aiReply };
+
+  try {
+    const rawJson = match[1].trim();
+    const data = JSON.parse(rawJson);
+
+    if (!data.name || !data.price) {
+      return { reply: aiReply };
+    }
+
+    const name = String(data.name).trim();
+    const baseSlug = name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/(^-|-$)/g, "");
+    const randomSuffix = Math.random().toString(36).slice(2, 6);
+    const slug = `${baseSlug || "product"}-${randomSuffix}`;
+    const price = Math.max(0, Math.round(Number(data.price) || 0));
+    const stock = Number(data.stock) || 20;
+    const categorySlug = String(data.categorySlug || "earrings").toLowerCase().trim();
+    const material = String(data.material || "18K Gold Plated").trim();
+    const shortDesc = String(data.shortDescription || data.description || "").slice(0, 200);
+    const desc = String(data.description || shortDesc || "Handcrafted luxury jewellery from Prem by SHK.");
+    const images = Array.isArray(data.images) ? data.images.filter(Boolean) : [];
+
+    if (db) {
+      const inserted = await db
+        .insert(products)
+        .values({
+          name,
+          slug,
+          categorySlug,
+          categorySlugs: [categorySlug],
+          price,
+          compareAtPrice: data.compareAtPrice ? Number(data.compareAtPrice) : null,
+          stock,
+          material,
+          shortDescription: shortDesc,
+          description: desc,
+          images,
+          rating: 50,
+          reviewCount: 0,
+          isNew: true,
+          isBestSeller: Boolean(data.isBestSeller),
+        })
+        .returning();
+
+      // Emit product.created event (automatically writes into sync_log)
+      emitEvent("product.created", {
+        slug,
+        name,
+        category: categorySlug,
+        price,
+        stock,
+        createdAt: new Date().toISOString(),
+      }).catch((err) =>
+        console.error("[chat] emitEvent product.created error:", err)
+      );
+
+      const cleanReply = aiReply
+        .replace(/```action:create_product\s*[\s\S]*?\s*```/, "")
+        .trim();
+
+      const successCard = `\n\n✅ **Product Successfully Added to Store!**\n- **Name:** ${name}\n- **Price:** PKR ${price.toLocaleString()}\n- **Category:** ${categorySlug.toUpperCase()}\n- **Stock:** ${stock} units\n- **Slug:** \`${slug}\`\n\n🔗 [View Product in Store](/product/${slug}) · [Manage in Inventory](/admin/inventory)\n\n*(Recorded in database & logged to \`sync_log\` as \`product.created:${slug}\`)*`;
+
+      return {
+        reply: `${cleanReply}\n${successCard}`.trim(),
+        createdProduct: inserted[0] || {
+          slug,
+          name,
+          price,
+          stock,
+          categorySlug,
+          images,
+        },
+      };
+    }
+  } catch (err) {
+    console.error("[chat] Failed to parse/create product from action:", err);
+  }
+
+  return { reply: aiReply };
+}
 
 export async function POST(req: NextRequest) {
   // Auth check
@@ -170,6 +311,18 @@ export async function POST(req: NextRequest) {
         content: `${SYSTEM_PROMPT}\n\nHere is the current live store data:\n\n${storeContext}`,
       };
 
+      // Format messages including attached images
+      const formattedUserMessages = userMessages.slice(-10).map((m) => {
+        let content = m.content;
+        if (m.images && m.images.length > 0) {
+          content += `\n\n[Attached Cloudinary Images:\n${m.images.map((img) => `- ${img}`).join("\n")}]`;
+        }
+        return {
+          role: m.role,
+          content,
+        };
+      });
+
       const candidateModels = Array.from(
         new Set([GROQ_MODEL, ...FALLBACK_MODELS].filter(Boolean))
       );
@@ -177,7 +330,7 @@ export async function POST(req: NextRequest) {
       for (const modelToTry of candidateModels) {
         try {
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 15000);
+          const timeoutId = setTimeout(() => controller.abort(), 20000);
 
           const res = await fetch(GROQ_API_URL, {
             method: "POST",
@@ -187,7 +340,7 @@ export async function POST(req: NextRequest) {
             },
             body: JSON.stringify({
               model: modelToTry,
-              messages: [systemMessage, ...userMessages.slice(-10)],
+              messages: [systemMessage, ...formattedUserMessages],
               temperature: 0.7,
               max_tokens: 1024,
               top_p: 0.9,
@@ -201,9 +354,16 @@ export async function POST(req: NextRequest) {
             const data = (await res.json()) as {
               choices?: { message?: { content?: string } }[];
             };
-            const reply =
+            const rawReply =
               data.choices?.[0]?.message?.content || "No response generated.";
-            return NextResponse.json({ reply });
+
+            // Process any product creation action
+            const actionResult = await handleProductCreationAction(rawReply);
+
+            return NextResponse.json({
+              reply: actionResult.reply,
+              createdProduct: actionResult.createdProduct,
+            });
           } else {
             const errBody = await res.text();
             console.warn(`[chat] Model ${modelToTry} failed (${res.status}):`, errBody);
@@ -261,6 +421,19 @@ function generateFallbackReply(query: string, storeContext: string): string {
   if (query.includes("best") && query.includes("sell")) {
     const bsLine = lines.find((l) => l.includes("Best sellers"));
     return `⭐ **Best Sellers**\n\n${bsLine || "No bestseller data available."}\n\n*Manage product flags on the [Products page](/admin).*`;
+  }
+
+  if (
+    query.includes("add") &&
+    (query.includes("product") ||
+      query.includes("item") ||
+      query.includes("piece") ||
+      query.includes("ring") ||
+      query.includes("necklace") ||
+      query.includes("earring") ||
+      query.includes("bracelet"))
+  ) {
+    return `💎 **Add a New Product**\n\nTo add a new piece to your catalog:\n1. **Attach or paste an image** using the 📷 button or by pressing Ctrl+V\n2. Specify the details:\n   - **Name** (e.g. Royal Emerald Choker)\n   - **Category** (earrings, rings, necklaces, bracelets, cuffs, sets)\n   - **Price** in PKR (e.g. 45000)\n   - **Stock** (e.g. 15)\n\nOnce you review the requirements, reply **"Add"** or **"Yes"** and I will publish it to your store database and record it in \`sync_log\`!`;
   }
 
   if (

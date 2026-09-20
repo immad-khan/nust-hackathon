@@ -5,6 +5,7 @@ import { orderItems, orders, products, syncLog } from "@/db/schema";
 import { getProductsBySlugs } from "@/lib/queries";
 import { shippingFor } from "@/lib/format";
 import { emitEvent } from "@/lib/events";
+import { emitEvent as emitFastnEvent, orderCreatedEvent } from "@/lib/fastn";
 import {
   sendMail,
   renderOrderConfirmationHtml,
@@ -147,23 +148,25 @@ export async function POST(request: Request) {
         .map((item) => `${item.quantity}x ${item.name}${item.variant ? ` (${item.variant})` : ""}`)
         .join(", ");
 
-      // Core: emit order.created event (with automatic sync_log upsert, retries & Fastn post)
-      emitEvent("order.created", {
-        orderNumber: number,
-        customerName: payload.customerName,
-        customerEmail: payload.email,
-        phone: payload.phone ?? "",
-        address: payload.address ?? "",
-        city: payload.city ?? "",
-        country: payload.country ?? "Pakistan",
-        items: itemsSummary,
-        subtotal,
-        shipping,
-        total: subtotal + shipping,
-        status: "confirmed",
-        note: payload.note ?? "",
-        createdAt: new Date().toISOString(),
-      }).catch((err) => console.error("[orders] emitEvent order.created error:", err));
+      // Fastn Webhook: Emit order.created event to Google Sheets via Fastn
+      try {
+        const orderData = {
+          orderNumber: number,
+          createdAt: new Date().toISOString(),
+          customerName: payload.customerName,
+          email: payload.email,
+          phone: payload.phone ?? "",
+          city: payload.city ?? "",
+          subtotal,
+          shipping,
+          total: subtotal + shipping,
+          status: "confirmed",
+          adminSeen: false,
+        };
+        await emitFastnEvent(orderCreatedEvent(orderData, priced));
+      } catch (e) {
+        console.error("[orders] Fastn emit failed:", e);
+      }
 
       // Core: emit product.updated & stock.low events for affected items
       for (const item of priced) {

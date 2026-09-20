@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { orderItems, orders, products, syncLog } from "@/db/schema";
 import { getProductsBySlugs } from "@/lib/queries";
 import { shippingFor } from "@/lib/format";
+import { emitEvent } from "@/lib/events";
 
 export const dynamic = "force-dynamic";
 
@@ -77,6 +78,8 @@ export async function POST(request: Request) {
     const eventId = `order.created:${number}`;
 
     if (db) {
+      const remainingStocks: Record<string, number> = {};
+
       // Execute order creation + atomic stock decrement in a transaction
       try {
         await db.transaction(async (tx) => {
@@ -96,6 +99,8 @@ export async function POST(request: Request) {
             if (updated.length === 0) {
               throw new Error(`INSUFFICIENT_STOCK:${item.name}`);
             }
+
+            remainingStocks[item.productSlug] = updated[0].stock;
           }
 
           // 2. Insert order record
@@ -120,25 +125,6 @@ export async function POST(request: Request) {
           await tx
             .insert(orderItems)
             .values(priced.map((item) => ({ ...item, orderNumber: number })));
-
-          // 4. Record sync log event for deduplication & failure tracking
-          await tx
-            .insert(syncLog)
-            .values({
-              eventId,
-              type: "order.created",
-              status: "pending",
-              attempts: 0,
-              error: "",
-              payload: {
-                orderNumber: number,
-                customerName: payload.customerName,
-                email: payload.email,
-                total: subtotal + shipping,
-                itemsCount: priced.length,
-              },
-            })
-            .onConflictDoNothing();
         });
       } catch (txError) {
         if (txError instanceof Error && txError.message.startsWith("INSUFFICIENT_STOCK:")) {
@@ -151,21 +137,47 @@ export async function POST(request: Request) {
         throw txError;
       }
 
-      // Trigger order-created webhook (Fastn / Notion sync)
-      const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-      fetch(`${appUrl}/api/webhooks/order-created`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ order_number: number, event_id: eventId }),
-      }).catch((err) => console.error("Order webhook trigger error:", err));
+      // Format items summary
+      const itemsSummary = priced
+        .map((item) => `${item.quantity}x ${item.name}${item.variant ? ` (${item.variant})` : ""}`)
+        .join(", ");
 
-      // Trigger inventory-updated webhook for all modified products
+      // Core: emit order.created event (with automatic sync_log upsert, retries & Fastn post)
+      emitEvent("order.created", {
+        orderNumber: number,
+        customerName: payload.customerName,
+        customerEmail: payload.email,
+        phone: payload.phone ?? "",
+        address: payload.address ?? "",
+        city: payload.city ?? "",
+        country: payload.country ?? "Pakistan",
+        items: itemsSummary,
+        subtotal,
+        shipping,
+        total: subtotal + shipping,
+        status: "confirmed",
+        note: payload.note ?? "",
+        createdAt: new Date().toISOString(),
+      }).catch((err) => console.error("[orders] emitEvent order.created error:", err));
+
+      // Core: emit product.updated & stock.low events for affected items
       for (const item of priced) {
-        fetch(`${appUrl}/api/webhooks/inventory-updated`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ slug: item.productSlug }),
-        }).catch((err) => console.error("Inventory webhook trigger error:", err));
+        const newStock = remainingStocks[item.productSlug] ?? 0;
+        emitEvent("product.updated", {
+          slug: item.productSlug,
+          name: item.name,
+          stock: newStock,
+          price: item.unitPrice,
+        }).catch((err) => console.error("[orders] emitEvent product.updated error:", err));
+
+        if (newStock < 10) {
+          emitEvent("stock.low", {
+            slug: item.productSlug,
+            name: item.name,
+            stock: newStock,
+            price: item.unitPrice,
+          }).catch((err) => console.error("[orders] emitEvent stock.low error:", err));
+        }
       }
     }
 

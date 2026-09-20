@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { subscribers } from "@/db/schema";
+import { emitEvent } from "@/lib/events";
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +14,10 @@ export async function POST(request: Request) {
     }
     if (db) {
       await db.insert(subscribers).values({ email }).onConflictDoNothing();
+      emitEvent("subscriber.created", {
+        email,
+        createdAt: new Date().toISOString(),
+      }).catch((err) => console.error("[newsletter] emitEvent subscriber.created error:", err));
     }
     return NextResponse.json({ ok: true });
   } catch {

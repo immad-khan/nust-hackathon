@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { orders } from "@/db/schema";
 import { isAdminAuthenticated } from "@/lib/admin-auth";
 import { getAllOrdersWithItems } from "@/lib/queries";
+import { emitEvent } from "@/lib/events";
 
 export const dynamic = "force-dynamic";
 
@@ -52,15 +53,24 @@ export async function PATCH(request: Request) {
       .set(updates)
       .where(eq(orders.orderNumber, body.orderNumber));
 
-    // If status was changed, optionally trigger webhook with deterministic eventId
+    // If status was changed, emit order.status_changed event
     if (body.status) {
-      const eventId = `order.status_changed:${body.orderNumber}:${body.status}`;
-      const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-      fetch(`${appUrl}/api/webhooks/order-created`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ order_number: body.orderNumber, event_id: eventId }),
-      }).catch((err) => console.error("Order status change webhook error:", err));
+      // Fetch order details for rich webhook payload
+      const [orderRow] = await db
+        .select()
+        .from(orders)
+        .where(eq(orders.orderNumber, body.orderNumber));
+
+      if (orderRow) {
+        emitEvent("order.status_changed", {
+          orderNumber: orderRow.orderNumber,
+          customerName: orderRow.customerName,
+          customerEmail: orderRow.email,
+          newStatus: body.status,
+          total: orderRow.total,
+          updatedAt: new Date().toISOString(),
+        }).catch((err) => console.error("[admin orders] emitEvent order.status_changed error:", err));
+      }
     }
 
     return NextResponse.json({ success: true, updates });

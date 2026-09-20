@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { appointments } from "@/db/schema";
+import { emitEvent } from "@/lib/events";
 
 export const dynamic = "force-dynamic";
 
@@ -29,6 +30,15 @@ export async function POST(request: Request) {
         preferredDate: body.preferredDate ?? "",
         message: body.message ?? "",
       });
+
+      emitEvent("appointment.created", {
+        name: body.name,
+        email: body.email,
+        phone: body.phone ?? "",
+        preferredDate: body.preferredDate ?? "",
+        message: body.message ?? "",
+        createdAt: new Date().toISOString(),
+      }).catch((err) => console.error("[appointments] emitEvent appointment.created error:", err));
     }
 
     return NextResponse.json({ ok: true });

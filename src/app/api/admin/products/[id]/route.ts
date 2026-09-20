@@ -3,6 +3,7 @@ import { eq, or } from "drizzle-orm";
 import { db } from "@/db";
 import { products } from "@/db/schema";
 import { isAdminAuthenticated } from "@/lib/admin-auth";
+import { emitEvent } from "@/lib/events";
 
 export const dynamic = "force-dynamic";
 
@@ -103,25 +104,43 @@ export async function PUT(
 
       const result = await db.update(products).set(clean).where(condition).returning();
       if (result.length > 0) {
-        const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-        const eventId = `inventory.updated:${result[0].slug}:${result[0].stock}`;
-        fetch(`${appUrl}/api/webhooks/inventory-updated`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ slug: result[0].slug, event_id: eventId }),
-        }).catch((err) => console.error("Inventory webhook trigger error:", err));
+        emitEvent("product.updated", {
+          slug: result[0].slug,
+          name: result[0].name,
+          category: result[0].categorySlug,
+          price: result[0].price,
+          compareAtPrice: result[0].compareAtPrice,
+          stock: result[0].stock,
+          isBestSeller: result[0].isBestSeller,
+          updatedAt: new Date().toISOString(),
+        }).catch((err) => console.error("[admin product PUT] emitEvent product.updated error:", err));
+
+        if (result[0].stock < 10) {
+          emitEvent("stock.low", {
+            slug: result[0].slug,
+            name: result[0].name,
+            stock: result[0].stock,
+            price: result[0].price,
+            updatedAt: new Date().toISOString(),
+          }).catch((err) => console.error("[admin product PUT] emitEvent stock.low error:", err));
+        }
+
         return NextResponse.json({ product: result[0] });
       }
 
       const inserted = await db.insert(products).values(clean).returning();
       if (inserted.length > 0) {
-        const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-        const eventId = `inventory.updated:${inserted[0].slug}:${inserted[0].stock}`;
-        fetch(`${appUrl}/api/webhooks/inventory-updated`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ slug: inserted[0].slug, event_id: eventId }),
-        }).catch((err) => console.error("Inventory webhook trigger error:", err));
+        emitEvent("product.created", {
+          slug: inserted[0].slug,
+          name: inserted[0].name,
+          category: inserted[0].categorySlug,
+          price: inserted[0].price,
+          compareAtPrice: inserted[0].compareAtPrice,
+          stock: inserted[0].stock,
+          isBestSeller: inserted[0].isBestSeller,
+          createdAt: new Date().toISOString(),
+        }).catch((err) => console.error("[admin product PUT] emitEvent product.created error:", err));
+
         return NextResponse.json({ product: inserted[0] });
       }
     } catch (error) {

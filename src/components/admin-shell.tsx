@@ -155,6 +155,23 @@ export function AdminShell({
   const { authenticated, loading, notice, signIn, signOut } = useAdminAuth();
   const [password, setPassword] = useState("");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [unseenOrdersCount, setUnseenOrdersCount] = useState(0);
+
+  useEffect(() => {
+    if (!authenticated) return;
+    fetch("/api/admin/orders", {
+      cache: "no-store",
+      headers: getAdminAuthHeaders(),
+    })
+      .then((res) => res.json())
+      .then((data: { orders?: { adminSeen?: boolean }[] }) => {
+        if (data.orders) {
+          const count = data.orders.filter((o) => o.adminSeen === false).length;
+          setUnseenOrdersCount(count);
+        }
+      })
+      .catch(() => undefined);
+  }, [authenticated, pathname]);
 
   if (authenticated === null) {
     return (
@@ -243,6 +260,11 @@ export function AdminShell({
             <nav className="hidden lg:flex items-center gap-1">
               {ADMIN_NAV_ITEMS.map((item) => {
                 const isActive = pathname === item.href;
+                const isOrdersItem = item.href === "/admin/orders";
+                const displayBadge = isOrdersItem && unseenOrdersCount > 0
+                  ? `${unseenOrdersCount} New`
+                  : item.badge;
+
                 return (
                   <Link
                     key={item.href}
@@ -255,11 +277,17 @@ export function AdminShell({
                   >
                     <span>{item.icon}</span>
                     <span>{item.label}</span>
-                    {item.badge && (
-                      <span className={`text-[0.52rem] px-1.5 py-0.2 rounded-full ${
-                        isActive ? "bg-cream text-rose-deep" : "bg-rose-deep/10 text-rose-deep"
+                    {displayBadge && (
+                      <span className={`text-[0.52rem] px-1.5 py-0.5 rounded-full font-semibold ${
+                        isOrdersItem && unseenOrdersCount > 0
+                          ? isActive
+                            ? "bg-cream text-rose-deep animate-pulse"
+                            : "bg-rose-deep text-cream animate-pulse"
+                          : isActive
+                          ? "bg-cream text-rose-deep"
+                          : "bg-rose-deep/10 text-rose-deep"
                       }`}>
-                        {item.badge}
+                        {displayBadge}
                       </span>
                     )}
                   </Link>
@@ -291,6 +319,11 @@ export function AdminShell({
             <div className="grid gap-1">
               {ADMIN_NAV_ITEMS.map((item) => {
                 const isActive = pathname === item.href;
+                const isOrdersItem = item.href === "/admin/orders";
+                const displayBadge = isOrdersItem && unseenOrdersCount > 0
+                  ? `${unseenOrdersCount} New`
+                  : item.badge;
+
                 return (
                   <Link
                     key={item.href}
@@ -306,9 +339,13 @@ export function AdminShell({
                       <span>{item.icon}</span>
                       <span>{item.label}</span>
                     </div>
-                    {item.badge && (
-                      <span className="text-[0.55rem] px-2 py-0.5 rounded-full bg-rose-light/20 text-rose-deep">
-                        {item.badge}
+                    {displayBadge && (
+                      <span className={`text-[0.55rem] px-2 py-0.5 rounded-full font-semibold ${
+                        isOrdersItem && unseenOrdersCount > 0
+                          ? "bg-rose-deep text-cream animate-pulse"
+                          : "bg-rose-light/20 text-rose-deep"
+                      }`}>
+                        {displayBadge}
                       </span>
                     )}
                   </Link>

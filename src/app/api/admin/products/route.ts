@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { products } from "@/db/schema";
 import { isAdminAuthenticated } from "@/lib/admin-auth";
 import { getProducts } from "@/lib/queries";
+import { emitEvent } from "@/lib/events";
 
 export const dynamic = "force-dynamic";
 
@@ -106,6 +107,18 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: "A product with this slug already exists." }, { status: 409 });
       }
       const result = await db.insert(products).values(clean).returning();
+      if (result.length > 0) {
+        emitEvent("product.created", {
+          slug: result[0].slug,
+          name: result[0].name,
+          category: result[0].categorySlug,
+          price: result[0].price,
+          compareAtPrice: result[0].compareAtPrice,
+          stock: result[0].stock,
+          isBestSeller: result[0].isBestSeller,
+          createdAt: new Date().toISOString(),
+        }).catch((err) => console.error("[admin products] emitEvent product.created error:", err));
+      }
       return NextResponse.json({ product: result[0] });
     } catch (error) {
       console.error("admin product create error", error);

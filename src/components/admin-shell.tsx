@@ -22,7 +22,6 @@ export function getAdminAuthHeaders(): Record<string, string> {
 export type AdminNavItem = {
   href: string;
   label: string;
-  icon: string;
   badge?: string;
   description: string;
 };
@@ -31,32 +30,27 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
   {
     href: "/admin",
     label: "Products",
-    icon: "💎",
     description: "Catalog & product management",
   },
   {
     href: "/admin/orders",
     label: "Orders",
-    icon: "📦",
     description: "Customer orders & fulfillment",
   },
   {
     href: "/admin/inventory",
     label: "Inventory",
-    icon: "📊",
     description: "Stock tracking & SKU management",
   },
   {
     href: "/admin/integrations",
     label: "Integrations",
-    icon: "🔌",
     badge: "New",
     description: "Notion, Slack & Sheets sync",
   },
   {
     href: "/admin/chat",
     label: "AI Chat",
-    icon: "✨",
     badge: "Beta",
     description: "Ask AI about your store",
   },
@@ -275,7 +269,6 @@ export function AdminShell({
                         : "text-ink-soft hover:bg-blush-soft hover:text-rose-deep"
                     }`}
                   >
-                    <span>{item.icon}</span>
                     <span>{item.label}</span>
                     {displayBadge && (
                       <span className={`text-[0.52rem] px-1.5 py-0.5 rounded-full font-semibold ${
@@ -336,7 +329,6 @@ export function AdminShell({
                     }`}
                   >
                     <div className="flex items-center gap-2.5">
-                      <span>{item.icon}</span>
                       <span>{item.label}</span>
                     </div>
                     {displayBadge && (
@@ -356,7 +348,7 @@ export function AdminShell({
                 onClick={() => setMobileMenuOpen(false)}
                 className="mt-2 flex items-center gap-2 rounded-sm border border-line px-3 py-2 text-xs uppercase tracking-[0.16em] text-muted hover:bg-blush-soft"
               >
-                <span>↗</span> View Public Store
+                View Public Store
               </Link>
             </div>
           </div>
